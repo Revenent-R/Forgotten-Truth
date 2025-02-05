@@ -16,10 +16,6 @@ public:
 	AProtPlayer();
 	UPROPERTY(EditDefaultsOnly,Category="Camera")
 	class UCameraComponent* Camera;
-	UPROPERTY(EditDefaultsOnly,Category="Flashlight")
-	class UStaticMeshComponent* FlashLight;
-	UPROPERTY(EditDefaultsOnly,Category="Light")
-	class USpotLightComponent* Light;
 	UPROPERTY(EditDefaultsOnly,Category="Sound")
 	class USoundBase* BackSound;
 
@@ -27,6 +23,7 @@ public:
 	bool FragmentPicked;
 	float Range;
 	float InterpSpeed;
+
 
 	UPROPERTY(BlueprintReadOnly)
 	bool mRight;
@@ -69,6 +66,12 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 	class UAudioComponent* Audio;
 
+	UPROPERTY(EditAnywhere,Category="Flash")
+	class AFlashlight* Flash;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool hasFlashlight;
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -95,6 +98,8 @@ public:
 
 	void PickupPills();
 	void ConsumePills();
+
+	void PickUpFlashLight();
 
 	void Interact();
 

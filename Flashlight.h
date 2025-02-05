@@ -4,38 +4,24 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "InteractableDoors.generated.h"
+#include "Flashlight.generated.h"
 
 UCLASS()
-class FORGOTTENTRUTH_API AInteractableDoors : public AActor
+class FORGOTTENTRUTH_API AFlashlight : public AActor
 {
 	GENERATED_BODY()
 	
 public:	
 	// Sets default values for this actor's properties
-	AInteractableDoors();
-	UPROPERTY(EditDefaultsOnly,Category="Door")
-	class UStaticMeshComponent* Door;
-	UPROPERTY(EditDefaultsOnly,Category="Box")
-	class UBoxComponent* BoxT;
+	AFlashlight();
+	UPROPERTY(EditDefaultsOnly,Category="Mesh")
+	class UStaticMeshComponent* FlashLight;
+	UPROPERTY(EditDefaultsOnly,Category="Light")
+	class USpotLightComponent* Light;
 	UPROPERTY(EditDefaultsOnly,Category="UI")
 	class UWidgetComponent* HUDWidget;
-	UPROPERTY(EditDefaultsOnly,Category="Sound")
-	class USoundBase* CloseSound;
-	UPROPERTY(EditDefaultsOnly,Category="Sound")
-	class USoundBase* OpenSound;
-
-	bool isPlaying;
-	bool isOpen;
-
-	UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Lock")
-	bool isLocked;
-
-	FRotator OGRotation;
-
-	class AProtPlayer* Ref;
-
-	float DoorOpenSpeed;
+	UPROPERTY(EditDefaultsOnly,Category="Trigger")
+	class UBoxComponent* BoxTrigger;
 
 protected:
 	// Called when the game starts or when spawned
@@ -45,12 +31,8 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	void ChangeDoorState();
-
 	UFUNCTION()
 	void OnOverlapBegin(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-	void FindPositionForHUD(class AProtPlayer* FHUDRef);
 
 	UFUNCTION()
 	void OnOverlapEnd(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);

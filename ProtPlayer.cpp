@@ -8,9 +8,11 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Components/WidgetComponent.h"
 #include "Fragments.h"
 #include "InteractableDoors.h"
 #include "InteractableDrawer.h"
+#include "Flashlight.h"
 #include "MyKey.h"
 #include "Battery.h"
 #include "Pills.h"
@@ -27,13 +29,13 @@ AProtPlayer::AProtPlayer()
 
 	Camera = CreateDefaultSubobject<UCameraComponent>("Camera");
 	Camera->SetupAttachment(GetMesh());
-	FlashLight = CreateDefaultSubobject<UStaticMeshComponent>("FlashLight");
-	FlashLight->SetupAttachment(GetMesh());
-	Light = CreateDefaultSubobject<USpotLightComponent>("Light");
-	Light->SetupAttachment(FlashLight);
+	//FlashLight = CreateDefaultSubobject<UStaticMeshComponent>("FlashLight");
+	//FlashLight->SetupAttachment(GetMesh());
+	//Light = CreateDefaultSubobject<USpotLightComponent>("Light");
+	//Light->SetupAttachment(FlashLight);
 
 	GetMesh()->CastShadow = false;
-	FlashLight->CastShadow = false;
+	//FlashLight->CastShadow = false;
 
 	bUseControllerRotationPitch = true;
 	GetCharacterMovement()->MaxWalkSpeed = 300.0f;
@@ -47,13 +49,16 @@ AProtPlayer::AProtPlayer()
 
 	isOn = false;
 	InputEnabled = false;
-	Light->SetIntensity(0.0f);
+	//Light->SetIntensity(0.0f);
 	Drain = 0.01f;
 
 	TimerT = 15.0f;
 	Timer = 0.0f;
 	Index = 0;
 	SprintPower = 1.0f;
+
+	hasFlashlight = false;
+
 
 }
 
@@ -65,7 +70,7 @@ void AProtPlayer::BeginPlay()
 	StartCutScene();
 
 	FAttachmentTransformRules rules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepRelative, EAttachmentRule::KeepWorld, false);
-	FlashLight->AttachToComponent(GetMesh(), rules, FName("LeftHandSocket"));
+	//FlashLight->AttachToComponent(GetMesh(), rules, FName("LeftHandSocket"));
 	Camera->AttachToComponent(GetMesh(), rules, FName("HeadSocket"));
 
 
@@ -77,11 +82,13 @@ void AProtPlayer::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	if (isOn) {
-		if (Power > 0.0f) {
-			Power -= (Drain * DeltaTime);
-		}
-		else {
-			ChangeFlashLightState();
+		if (Flash != nullptr) {
+			if (Power > 0.0f) {
+				Power -= (Drain * DeltaTime);
+			}
+			else {
+				ChangeFlashLightState();
+			}
 		}
 	}
 
@@ -113,6 +120,7 @@ void AProtPlayer::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 	PlayerInputComponent->BindAction("TurnOn", IE_Pressed, this, &AProtPlayer::ChangeFlashLightState);
 	PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &AProtPlayer::Sprint);
 	PlayerInputComponent->BindAction("Sprint", IE_Released, this, &AProtPlayer::StopSprint);
+	PlayerInputComponent->BindAction("PickFlash", IE_Pressed, this, &AProtPlayer::PickUpFlashLight);
 
 }
 
@@ -132,7 +140,7 @@ void AProtPlayer::MoveRight(float val)
 			//if (val > 0) { mRight = true; }
 			//if (val < 0) { mRight = false; }
 			RL = val;
-			//GEngine->AddOnScreenDebugMessage(-1, 1.0f * GetWorld()->GetDeltaSeconds(), FColor::Red, FString::Printf(TEXT("%d"), RL.Length()));
+			//GEngine->AddOnScreenDebugMessage(-1, 1.0f * GetWorld()->GetDeltaSeconds(), FColor::Red, FString::Printf(TEXT("%d"), RL));
 			AddMovementInput(GetActorRightVector(), val);
 		}
 	}
@@ -227,6 +235,7 @@ void AProtPlayer::StartFragmentPick()
 			Memory = Cast<AFragments>(Hit.GetActor());
 			if (Memory != nullptr) {
 				Memory->Fragment->SetSimulatePhysics(true);
+				Memory->HUDWidget->SetVisibility(true);
 				if (Memory->Last) {
 					APlayerController* PC = Cast<APlayerController>(GetController());
 					UKismetSystemLibrary::QuitGame(GetWorld(), PC, EQuitPreference::Quit, true);
@@ -247,6 +256,7 @@ void AProtPlayer::FragmentPickUp(AFragments* PickedFragment)
 		if (FVector::Dist(PickedFragment->GetActorLocation(), Target) <= 1.0f) {
 			PickedFragment->AddActorLocalRotation(FRotator(0.0f, 180.0f, 0.0f));
 			FragmentPicked = true;
+			PickedFragment->HUDWidget->SetVisibility(false);
 			GetWorldTimerManager().ClearTimer(InspectTimer);
 		}
 	}
@@ -259,10 +269,13 @@ void AProtPlayer::PickupPills()
 	FVector End = Start + (Camera->GetForwardVector() * Range);
 	FCollisionQueryParams params;
 	params.AddIgnoredActor(this);
-	if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params)) {
-		APills* Pill = Cast<APills>(Hit.GetActor());
-		ABattery* Batt = Cast<ABattery>(Hit.GetActor());
-		AMyKey* Key = Cast<AMyKey>(Hit.GetActor());
+	GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params);
+	FHitResult NHit;
+	FCollisionShape Rec = FCollisionShape::MakeBox(FVector(70.0f, 70.0f, 70.0f));
+	if (GetWorld()->SweepSingleByChannel(NHit, Hit.Location, Hit.Location, FRotator(0.0f, 0.0f, 0.0f).Quaternion(), ECC_Visibility, Rec, params)) {
+		APills* Pill = Cast<APills>(NHit.GetActor());
+		ABattery* Batt = Cast<ABattery>(NHit.GetActor());
+		AMyKey* Key = Cast<AMyKey>(NHit.GetActor());
 		if (Pill != nullptr) {
 			PillsAmount++;
 			Heal = Pill->HealingPower;
@@ -290,6 +303,34 @@ void AProtPlayer::ConsumePills()
 			Paranoia = 0;
 		}
 		PillsAmount--;
+	}
+}
+
+void AProtPlayer::PickUpFlashLight()
+{
+	if (Flash == nullptr) {
+		FHitResult Hit;
+		FVector Start = Camera->GetComponentLocation();
+		FVector End = Start + (Camera->GetForwardVector() * Range);
+		FCollisionQueryParams params;
+		params.AddIgnoredActor(this);
+		if (Flash != nullptr) {
+			params.AddIgnoredActor(Flash);
+		}
+		GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params);
+		FHitResult NHit;
+		FCollisionShape Rec = FCollisionShape::MakeBox(FVector(50.0f, 50.0f, 50.0f));
+		if (GetWorld()->SweepSingleByChannel(NHit, Hit.Location, Hit.Location, FRotator(0.0f, 0.0f, 0.0f).Quaternion(), ECC_Visibility, Rec, params)) {
+			Flash = Cast<AFlashlight>(NHit.GetActor());
+			if (Flash != nullptr) {
+				Flash->FlashLight->SetSimulatePhysics(false);
+				FAttachmentTransformRules rules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
+				Flash->AttachToComponent(GetMesh(), rules, FName("LeftHandSocket"));
+				Flash->Light->SetIntensity(0.0f);
+				Flash->HUDWidget->SetVisibility(false);
+				hasFlashlight = true;
+			}
+		}
 	}
 }
 
@@ -355,7 +396,7 @@ void AProtPlayer::StopCutScene()
 		GetMesh()->SetAnimationMode(EAnimationMode::AnimationBlueprint);
 		InputEnabled = true;
 		GetMesh()->CastShadow = true;
-		FlashLight->CastShadow = true;
+		//FlashLight->CastShadow = true;
 		Audio = UGameplayStatics::SpawnSound2D(GetWorld(), BackSound, 0.6f);
 	}
 }
@@ -364,11 +405,15 @@ void AProtPlayer::ChangeFlashLightState()
 {
 	if (InputEnabled) {
 		if (isOn) {
-			Light->SetIntensity(0.0f);
+			if (Flash != nullptr) {
+				Flash->Light->SetIntensity(0.0f);
+			}
 		}
 		else {
 			if (Power > 0.0f) {
-				Light->SetIntensity(1000.0f);
+				if (Flash != nullptr) {
+					Flash->Light->SetIntensity(1000.0f);
+				}
 			}
 		}
 		isOn = !isOn;

@@ -5,8 +5,10 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/BoxComponent.h"
-#include "Components/TextBlock.h"
 #include "Components/PointLightComponent.h"
+#include "Components/WidgetComponent.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "ProtPlayer.h"
 
 // Sets default values
 AFragments::AFragments()
@@ -22,6 +24,18 @@ AFragments::AFragments()
 	Text->SetupAttachment(Fragment);
 	Light = CreateDefaultSubobject<UPointLightComponent>("PointLight");
 	Light->SetupAttachment(Fragment);
+	HUDWidget = CreateDefaultSubobject<UWidgetComponent>("Widget");
+	HUDWidget->SetupAttachment(Fragment);
+	
+	HUDWidget->SetVisibility(false);
+
+	HUDWidget->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
+
+	Box->SetWorldScale3D(FVector(4.75f, 5.5f, 5.75f));
+
+	HUDWidget->SetDrawSize(FVector2D(140.0f, 100.0f));
+
+	HUDWidget->SetWidgetSpace(EWidgetSpace::Screen);
 
 	Text->SetTextRenderColor(FColor::Black);
 
@@ -39,6 +53,9 @@ AFragments::AFragments()
 	PaperSound = Sound.Object;
 
 	//Fragment->AddWorldRotation(FRotator(0.0f, 90.0f, 0.0f));
+
+	Box->OnComponentBeginOverlap.AddDynamic(this, &AFragments::OnOverlapBegin);
+	Box->OnComponentEndOverlap.AddDynamic(this, &AFragments::OnOverlapEnd);
 	
 
 }
@@ -83,5 +100,30 @@ void AFragments::Pulsate()
 void AFragments::StopPulsate()
 {
 	GetWorldTimerManager().ClearTimer(PulseTimer);
+}
+
+void AFragments::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	AProtPlayer* PlayR = Cast<AProtPlayer>(OtherActor);
+	if (PlayR != nullptr) {
+		HUDWidget->SetVisibility(true);
+		//FTimerDelegate Del;
+		//Del.BindUFunction(this, FName("OrientHUDToPlayer"), PlayR);
+		//GetWorldTimerManager().SetTimer(OrientHUD, Del, 0.7f, true);
+	}
+}
+
+void AFragments::OrientHUDToPlayer(AProtPlayer* Ref)
+{
+	HUDWidget->SetWorldRotation(UKismetMathLibrary::FindLookAtRotation(HUDWidget->GetComponentLocation(), Ref->GetActorLocation()));
+}
+
+void AFragments::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	AProtPlayer* PlayR = Cast<AProtPlayer>(OtherActor);
+	if (PlayR != nullptr) {
+		HUDWidget->SetVisibility(false);
+		//GetWorldTimerManager().ClearTimer(OrientHUD);
+	}
 }
 

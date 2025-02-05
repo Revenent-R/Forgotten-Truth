@@ -18,6 +18,10 @@ public:
 	class UStaticMeshComponent* KeyMesh;
 	UPROPERTY(EditDefaultsOnly,Category="Box")
 	class UBoxComponent* Box;
+	UPROPERTY(EditDefaultsOnly,Category="UI")
+	class UWidgetComponent* HUDWidget;
+
+	FTimerHandle OrientHUD;
 
 protected:
 	// Called when the game starts or when spawned
@@ -26,5 +30,14 @@ protected:
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+	UFUNCTION()
+	void OnOverlapBegin(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+	UFUNCTION()
+	void OrientHUDToPlayer(class AProtPlayer* Ref);
+
+	UFUNCTION()
+	void OnOverlapEnd(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 };

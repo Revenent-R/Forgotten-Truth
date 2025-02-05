@@ -26,6 +26,8 @@ public:
 	class USoundBase* PaperSound;
 	UPROPERTY(EditDefaultsOnly,Category="Light")
 	class UPointLightComponent* Light;
+	UPROPERTY(EditDefaultsOnly,Category="UI")
+	class UWidgetComponent* HUDWidget;
 
 	FTimerHandle PulseTimer;
 
@@ -36,6 +38,7 @@ public:
 	float maxIntensity;
 	float minIntensity;
 	bool reachedMin;
+	FTimerHandle OrientHUD;
 
 protected:
 	// Called when the game starts or when spawned
@@ -48,5 +51,14 @@ public:
 	void StartPulsate();
 	void Pulsate();
 	void StopPulsate();
+
+	UFUNCTION()
+	void OnOverlapBegin(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+	UFUNCTION()
+	void OrientHUDToPlayer(class AProtPlayer* Ref);
+
+	UFUNCTION()
+	void OnOverlapEnd(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 };
