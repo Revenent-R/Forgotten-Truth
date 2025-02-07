@@ -72,6 +72,22 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 	bool hasFlashlight;
 
+	UPROPERTY(EditDefaultsOnly,Category="UI")
+	TSubclassOf<class UUserWidget> MainWidgetClass;
+	class UBaseHUDWidget* MainWidget;
+	UPROPERTY(EditDefaultsOnly,Category="UI")
+	TSubclassOf<class UUserWidget> BatteryWidgetClass;
+	class UBaseProgressBar* BatteryWidget;
+	UPROPERTY(EditDefaultsOnly,Category="UI")
+	TSubclassOf<class UUserWidget> SprintWidgetClass;
+	class UBaseProgressBar* SprintWidget;
+
+	UPROPERTY(EditAnywhere)
+	class ADiary* DiaryRef;
+
+	bool hasBookOpened;
+
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -103,11 +119,17 @@ public:
 
 	void Interact();
 
+	void StartSprint();
 	void Sprint();
 	void StopSprint();
 
+	void ResetColor();
+
 	void StartCutScene();
 	void StopCutScene();
+
+	void StartOpenBook();
+	void OpenBook();
 
 	void ChangeFlashLightState();
 

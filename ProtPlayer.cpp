@@ -9,17 +9,26 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Components/WidgetComponent.h"
+#include "Components/CanvasPanel.h"
+#include "Components/VerticalBox.h"
+#include "Components/ProgressBar.h"
 #include "Fragments.h"
 #include "InteractableDoors.h"
 #include "InteractableDrawer.h"
 #include "Flashlight.h"
 #include "MyKey.h"
 #include "Battery.h"
+#include "BaseHUDWidget.h"
+#include "BaseProgressBar.h"
+#include "Diary.h"
 #include "Pills.h"
 
 FTimerHandle InspectTimer;
 FTimerHandle CutSceneTimer;
 FTimerHandle DisableTimer;
+FTimerHandle SprintTimer;
+FTimerHandle SprintReset;
+FTimerHandle BookTimer;
 
 // Sets default values
 AProtPlayer::AProtPlayer()
@@ -59,7 +68,7 @@ AProtPlayer::AProtPlayer()
 
 	hasFlashlight = false;
 
-
+	hasBookOpened = false;
 }
 
 // Called when the game starts or when spawned
@@ -69,9 +78,18 @@ void AProtPlayer::BeginPlay()
 
 	StartCutScene();
 
+	SprintReset.Invalidate();
+
 	FAttachmentTransformRules rules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepRelative, EAttachmentRule::KeepWorld, false);
 	//FlashLight->AttachToComponent(GetMesh(), rules, FName("LeftHandSocket"));
 	Camera->AttachToComponent(GetMesh(), rules, FName("HeadSocket"));
+
+	MainWidget = Cast<UBaseHUDWidget>(CreateWidget<UUserWidget>(GetWorld(), MainWidgetClass, FName("MainWidgetInst")));
+	MainWidget->AddToViewport();
+	SprintWidget = Cast<UBaseProgressBar>(CreateWidget<UUserWidget>(GetWorld(), SprintWidgetClass, FName("SprintWidgetInst")));
+	MainWidget->VBox->AddChild(SprintWidget);
+	SprintWidget->SetPadding(FMargin(0.0f, 70.0f,0.0f,0.0f));
+	SprintWidget->SetProgress(SprintPower, 1.0f);
 
 
 }
@@ -98,6 +116,13 @@ void AProtPlayer::Tick(float DeltaTime)
 		}
 	}
 
+	if (BatteryWidget != nullptr) {
+		BatteryWidget->SetProgress(Power, 1.0f);
+	}
+	if (SprintWidget != nullptr) {
+		SprintWidget->SetProgress(SprintPower, 1.0f);
+	}
+
 	IdleTimer(DeltaTime);
 
 }
@@ -118,7 +143,7 @@ void AProtPlayer::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 	PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &AProtPlayer::Jump);
 	PlayerInputComponent->BindAction("Jump", IE_Released, this, &AProtPlayer::StopJumping);
 	PlayerInputComponent->BindAction("TurnOn", IE_Pressed, this, &AProtPlayer::ChangeFlashLightState);
-	PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &AProtPlayer::Sprint);
+	PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &AProtPlayer::StartSprint);
 	PlayerInputComponent->BindAction("Sprint", IE_Released, this, &AProtPlayer::StopSprint);
 	PlayerInputComponent->BindAction("PickFlash", IE_Pressed, this, &AProtPlayer::PickUpFlashLight);
 
@@ -127,7 +152,7 @@ void AProtPlayer::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 void AProtPlayer::MoveForward(float val)
 {
 	if (InputEnabled) {
-		if (!FragmentPicked) {
+		if (!FragmentPicked && !hasBookOpened) {
 			AddMovementInput(GetActorForwardVector(), val);
 		}
 	}
@@ -136,7 +161,7 @@ void AProtPlayer::MoveForward(float val)
 void AProtPlayer::MoveRight(float val)
 {
 	if (InputEnabled) {
-		if (!FragmentPicked) {
+		if (!FragmentPicked && !hasBookOpened) {
 			//if (val > 0) { mRight = true; }
 			//if (val < 0) { mRight = false; }
 			RL = val;
@@ -149,12 +174,15 @@ void AProtPlayer::MoveRight(float val)
 void AProtPlayer::Turn(float val)
 {
 	if (InputEnabled) {
-		if (!FragmentPicked) {
+		if (!FragmentPicked && !hasBookOpened) {
 			AddControllerYawInput(val);
 		}
 		else {
 			if (Memory != nullptr) {
 				Memory->AddActorWorldRotation(FRotator(0.0f, val, 0.0f));
+			}
+			if (DiaryRef != nullptr) {
+				DiaryRef->AddActorWorldRotation(FRotator(0.0f, val, 0.0f));
 			}
 		}
 	}
@@ -163,12 +191,15 @@ void AProtPlayer::Turn(float val)
 void AProtPlayer::LookUp(float val)
 {
 	if (InputEnabled) {
-		if (!FragmentPicked) {
+		if (!FragmentPicked && !hasBookOpened) {
 			AddControllerPitchInput(val);
 		}
 		else {
 			if (Memory != nullptr) {
 				Memory->AddActorWorldRotation(FRotator(val, 0.0f, 0.0f));
+			}
+			if (DiaryRef != nullptr) {
+				DiaryRef->AddActorWorldRotation(FRotator(val, 0.0f, 0.0f));
 			}
 		}
 	}
@@ -192,7 +223,7 @@ void AProtPlayer::StopJumping()
 
 void AProtPlayer::IdleTimer(float DeltaTime)
 {
-	if (GetVelocity().Length() <= 0) {
+	if (GetVelocity().Length() <= 0 && !hasBookOpened && !FragmentPicked) {
 		Timer += 1.0f * DeltaTime;
 		if (Timer >= TimerT) {
 			Index = 1;
@@ -206,45 +237,56 @@ void AProtPlayer::IdleTimer(float DeltaTime)
 
 void AProtPlayer::StartFragmentPick()
 {
-	if (!FragmentPicked) {
-		FHitResult Hit;
-		FVector Start = Camera->GetComponentLocation();
-		FVector End = Start + (Camera->GetForwardVector() * Range);
-		FCollisionQueryParams params;
-		params.AddIgnoredActor(this);
-		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params)) {
-			Memory = Cast<AFragments>(Hit.GetActor());
-			if (Memory != nullptr) {
-				Memory->Fragment->SetSimulatePhysics(false);
-				Memory->Light->SetIntensity(0.0f);
-				UGameplayStatics::PlaySound2D(GetWorld(), Memory->PaperSound, 1.0f, 1.0f, 0.0f, nullptr, Memory);
-				Memory->StopPulsate();
-				FTimerDelegate Del;
-				Del.BindUFunction(this, FName("FragmentPickUp"), Memory);
-				GetWorldTimerManager().SetTimer(InspectTimer, Del, 0.3f, true);
-			}
+	FHitResult Hit;
+	FVector Start = Camera->GetComponentLocation();
+	FVector End = Start + (Camera->GetForwardVector() * Range);
+	FCollisionQueryParams params;
+	params.AddIgnoredActor(this);
+	/*if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params)) {
+		DiaryRef = Cast<ADiary>(Hit.GetActor());
+		if (DiaryRef != nullptr) {
+			DiaryRef->Fragment->SetSimulatePhysics(false);
+			DiaryRef->Fragment->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			//DiaryRef->DiaryMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			DiaryRef->StopPulsate();
+			DiaryRef->Light->SetIntensity(0.0f);
+			DiaryRef->HUDWidget->SetVisibility(false);
+			DiaryRef->Fragment->CastShadow = false;
+			FAttachmentTransformRules rules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
+			DiaryRef->AttachToComponent(GetMesh(), rules, FName("Back"));
 		}
 	}
-	if (FragmentPicked) {
-		FHitResult Hit;
-		FVector Start = Camera->GetComponentLocation();
-		FVector End = Start + (Camera->GetForwardVector() * Range);
-		FCollisionQueryParams params;
-		params.AddIgnoredActor(this);
-		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params)) {
-			Memory = Cast<AFragments>(Hit.GetActor());
-			if (Memory != nullptr) {
-				Memory->Fragment->SetSimulatePhysics(true);
-				Memory->HUDWidget->SetVisibility(true);
-				if (Memory->Last) {
-					APlayerController* PC = Cast<APlayerController>(GetController());
-					UKismetSystemLibrary::QuitGame(GetWorld(), PC, EQuitPreference::Quit, true);
+	else {*/
+		if (!FragmentPicked) {
+			if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params)) {
+				Memory = Cast<AFragments>(Hit.GetActor());
+				if (Memory != nullptr) {
+					Memory->Fragment->SetSimulatePhysics(false);
+					Memory->Light->SetIntensity(0.0f);
+					UGameplayStatics::PlaySound2D(GetWorld(), Memory->PaperSound, 1.0f, 1.0f, 0.0f, nullptr, Memory);
+					Memory->StopPulsate();
+					FTimerDelegate Del;
+					Del.BindUFunction(this, FName("FragmentPickUp"), Memory);
+					GetWorldTimerManager().SetTimer(InspectTimer, Del, 0.3f, true);
 				}
-				FragmentPicked = false;
-				//Memory->Fragment->AddImpulse(-Memory->Fragment->GetForwardVector() * 100.0f);
 			}
 		}
-	}
+		if (FragmentPicked) {
+			if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, params)) {
+				Memory = Cast<AFragments>(Hit.GetActor());
+				if (Memory != nullptr) {
+					Memory->Fragment->SetSimulatePhysics(true);
+					Memory->HUDWidget->SetVisibility(true);
+					if (Memory->Last) {
+						APlayerController* PC = Cast<APlayerController>(GetController());
+						UKismetSystemLibrary::QuitGame(GetWorld(), PC, EQuitPreference::Quit, true);
+					}
+					FragmentPicked = false;
+					//Memory->Fragment->AddImpulse(-Memory->Fragment->GetForwardVector() * 100.0f);
+				}
+			}
+		}
+	//}
 }
 
 void AProtPlayer::FragmentPickUp(AFragments* PickedFragment)
@@ -329,6 +371,12 @@ void AProtPlayer::PickUpFlashLight()
 				Flash->Light->SetIntensity(0.0f);
 				Flash->HUDWidget->SetVisibility(false);
 				hasFlashlight = true;
+				BatteryWidget = Cast<UBaseProgressBar>(CreateWidget<UUserWidget>(GetWorld(), BatteryWidgetClass, FName("BatteryWidgetInst")));
+				if (BatteryWidget != nullptr) {
+					MainWidget->VBox->AddChild(BatteryWidget);
+					BatteryWidget->SetPadding(FMargin(50.0f, 60.0f, 0.0f, 0.0f));
+					BatteryWidget->SetProgress(Power, 1.0f);
+				}
 			}
 		}
 	}
@@ -366,12 +414,37 @@ void AProtPlayer::Interact()
 	}
 }
 
+void AProtPlayer::StartSprint()
+{
+	if (InputEnabled) {
+		if (!SprintReset.IsValid()) {
+			if (SprintPower > 0.0f && GetCharacterMovement()->Velocity.Length() > 0.0f) {
+				GetCharacterMovement()->MaxWalkSpeed = 700.0f;
+				Sprinting = true;
+				SprintPower -= (0.3f * GetWorld()->GetDeltaSeconds());
+				GetWorldTimerManager().SetTimer(SprintTimer, this, &AProtPlayer::Sprint, 0.04f, true);
+			}
+		}
+	}
+}
+
 void AProtPlayer::Sprint()
 {
 	if (InputEnabled) {
-		GetCharacterMovement()->MaxWalkSpeed = 700.0f;
-		Sprinting = true;
-		SprintPower -= (0.3f * GetWorld()->GetDeltaSeconds());
+		if (SprintPower > 0.0f && GetCharacterMovement()->Velocity.Length() > 0.0f) {
+			SprintPower -= (0.3f * GetWorld()->GetDeltaSeconds());
+		}
+		else if (GetCharacterMovement()->Velocity.Length() <= 0.0f) {
+			StopSprint();
+		}
+		else if(SprintPower <= 0.0f) {
+			if (SprintWidget != nullptr) {
+				FLinearColor Red = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+				SprintWidget->SetColorOnEmpty(Red);
+				GetWorldTimerManager().SetTimer(SprintReset, this, &AProtPlayer::ResetColor, 7.0f, false);
+			}
+			StopSprint();
+		}
 	}
 }
 
@@ -380,6 +453,16 @@ void AProtPlayer::StopSprint()
 	if (InputEnabled) {
 		GetCharacterMovement()->MaxWalkSpeed = 300.0f;
 		Sprinting = false;
+		GetWorldTimerManager().ClearTimer(SprintTimer);
+	}
+}
+
+void AProtPlayer::ResetColor()
+{
+	FLinearColor Blue = FLinearColor(0.0f, 0.5f, 1.0f, 1.0f);
+	if (SprintWidget != nullptr) {
+		SprintWidget->SetColorOnEmpty(Blue);
+		GetWorldTimerManager().ClearTimer(SprintReset);
 	}
 }
 
@@ -398,6 +481,44 @@ void AProtPlayer::StopCutScene()
 		GetMesh()->CastShadow = true;
 		//FlashLight->CastShadow = true;
 		Audio = UGameplayStatics::SpawnSound2D(GetWorld(), BackSound, 0.6f);
+	}
+}
+
+void AProtPlayer::StartOpenBook()
+{
+	if (!hasBookOpened) {
+		if (DiaryRef != nullptr) {
+			GetWorldTimerManager().SetTimer(BookTimer, this, &AProtPlayer::OpenBook, 0.07f, true);
+		}
+	}
+	else {
+		if (DiaryRef != nullptr) {
+			GetWorldTimerManager().SetTimer(BookTimer, this, &AProtPlayer::OpenBook, 0.07f, true);
+		}
+	}
+}
+
+void AProtPlayer::OpenBook()
+{
+	if (!hasBookOpened) {
+		if (DiaryRef != nullptr) {
+			DiaryRef->SetActorLocation(FVector(FMath::VInterpTo(DiaryRef->GetActorLocation(), (Camera->GetComponentLocation() + (Camera->GetForwardVector() * 60.0f)), GetWorld()->GetDeltaSeconds(), InterpSpeed * GetWorld()->GetDeltaSeconds())));
+			DiaryRef->SetActorRotation(FRotator(FMath::RInterpTo(DiaryRef->GetActorRotation(),Camera->GetComponentRotation(),GetWorld()->GetDeltaSeconds(),InterpSpeed * GetWorld()->GetDeltaSeconds())));
+			if (FVector::Dist(DiaryRef->GetActorLocation(), Camera->GetComponentLocation() + (Camera->GetForwardVector() * 60.0f)) <= 1.0f && DiaryRef->GetActorRotation().Equals(Camera->GetComponentRotation())) {
+				DiaryRef->AddActorLocalRotation(FRotator(0.0f, 180.0f, 0.0f));
+				GetWorldTimerManager().ClearTimer(BookTimer);
+				//DiaryRef->DiaryMesh->PlayAnimation(DiaryRef->OpenBook, false);
+				hasBookOpened = true;
+			}
+		}
+	}
+	else {
+		if (DiaryRef != nullptr) {
+			DiaryRef->SetActorRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
+			GetWorldTimerManager().ClearTimer(BookTimer);
+			hasBookOpened = false;
+		}
+		//DiaryRef->DiaryMesh->PlayAnimation(DiaryRef->CloseBook, false);
 	}
 }
 

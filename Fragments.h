@@ -28,6 +28,8 @@ public:
 	class UPointLightComponent* Light;
 	UPROPERTY(EditDefaultsOnly,Category="UI")
 	class UWidgetComponent* HUDWidget;
+	UPROPERTY(EditDefaultsOnly,Category="Image")
+	class UTexture2D* Image;
 
 	FTimerHandle PulseTimer;
 
